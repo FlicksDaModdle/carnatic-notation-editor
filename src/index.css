@@ -80,19 +80,24 @@ button, input, select, textarea {
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Make the entire UI a bit bigger by scaling up base font sizes */
+/* Make the entire UI a bit bigger by scaling up base font sizes — every
+   Tailwind rem-based size (text, padding, gaps, icons) scales up with it. */
 html {
-  font-size: 18px;
+  font-size: 20px;
 }
 
 /* Clean PDF Print Handshake */
 @media print {
-  html {
-    font-size: 12px;
-  }
+  /* The on-screen page boxes are already sized to the exact physical paper
+     dimensions (A4 or Letter, whichever the user picked) with their own
+     p-12 padding standing in for the page margin — so @page just needs to
+     get out of the way and let that content box be the page, instead of
+     forcing its own (always-A4) size/margin on top of it. Root font-size
+     is left alone too, so rem-based spacing prints at the same scale it
+     was laid out and paginated at on screen. */
   @page {
-    size: A4;
-    margin: 12mm;
+    size: auto;
+    margin: 0;
   }
 
   body {

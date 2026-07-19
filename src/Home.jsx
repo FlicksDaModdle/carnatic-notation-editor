@@ -123,11 +123,11 @@ function Home({ onOpen, onCreateNew, onManageTalams }) {
                   <div className="flex items-center justify-between mt-2 pt-2 border-t border-tambura-800">
                     <span className="text-[11px] text-tambura-500">Edited {timeAgo(n.updatedAt)}</span>
 
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => handleDuplicate(n.id)}
                         title="Duplicate"
-                        className="text-[10px] font-mono font-bold w-6 h-6 text-tambura-300 hover:bg-gold-600 hover:text-white active:scale-90 rounded flex items-center justify-center transition-all duration-150"
+                        className="text-xs font-mono font-bold w-8 h-8 text-tambura-300 hover:bg-gold-600 hover:text-white active:scale-90 rounded-md flex items-center justify-center transition-all duration-150"
                       >
                         ⧉
                       </button>
@@ -135,13 +135,13 @@ function Home({ onOpen, onCreateNew, onManageTalams }) {
                         <>
                           <button
                             onClick={() => handleDelete(n.id)}
-                            className="text-[10px] font-bold px-2 h-6 text-white bg-rose-600 hover:bg-rose-500 active:scale-90 rounded flex items-center justify-center animate-pop-in transition-transform duration-150"
+                            className="text-xs font-bold px-3 h-8 text-white bg-rose-600 hover:bg-rose-500 active:scale-90 rounded-md flex items-center justify-center animate-pop-in transition-transform duration-150"
                           >
                             Delete?
                           </button>
                           <button
                             onClick={() => setConfirmDeleteId(null)}
-                            className="text-[10px] font-bold w-6 h-6 text-tambura-300 hover:bg-tambura-800 active:scale-90 rounded flex items-center justify-center animate-pop-in transition-transform duration-150"
+                            className="text-sm font-bold w-8 h-8 text-tambura-300 hover:bg-tambura-800 active:scale-90 rounded-md flex items-center justify-center animate-pop-in transition-transform duration-150"
                           >
                             ×
                           </button>
@@ -150,7 +150,7 @@ function Home({ onOpen, onCreateNew, onManageTalams }) {
                         <button
                           onClick={() => setConfirmDeleteId(n.id)}
                           title="Delete"
-                          className="text-[10px] font-bold w-6 h-6 text-rose-400 hover:bg-rose-600 hover:text-white active:scale-90 rounded flex items-center justify-center transition-all duration-150"
+                          className="text-sm font-bold w-8 h-8 text-rose-400 hover:bg-rose-600 hover:text-white active:scale-90 rounded-md flex items-center justify-center transition-all duration-150"
                         >
                           ×
                         </button>
