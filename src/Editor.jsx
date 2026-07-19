@@ -65,6 +65,28 @@ const PAGE_HEIGHT_PX = {
   Letter: 11 * 96,
 };
 
+// Must stay in sync with the `html { font-size: ... }` rule in index.css.
+// Every Tailwind rem-based utility on the page (p-12, pb-2, mt-2, ...)
+// resolves against this, so pagination math needs the same number to turn
+// those classes into real pixels without waiting on a DOM read.
+const ROOT_FONT_PX = 20;
+const PAGE_PADDING_PX = 3 * ROOT_FONT_PX * 2; // p-12 (3rem) on top + bottom
+const NOTE_ROW_PX = 36; // NotationCell's fixed h-[36px]
+const LINE_GAP_PX = 0.5 * ROOT_FONT_PX; // mt-2 above each line's lyrics strip
+const LINE_PAD_BOTTOM_PX = 0.5 * ROOT_FONT_PX; // pb-2 under each visual line
+
+// Subheader rows are a single fixed-height line (a plain <input>, not an
+// auto-growing textarea) precisely so pagination can treat them like any
+// other fixed-pixel row instead of needing a live DOM measurement.
+const SUBHEADER_ROW_PX = 34;
+
+// Spacer rows: a blank gap of adjustable height. Defaults/limits/step for
+// the +/- stepper control shown on hover.
+const SPACER_DEFAULT_PX = 24;
+const SPACER_MIN_PX = 8;
+const SPACER_MAX_PX = 200;
+const SPACER_STEP_PX = 8;
+
 const FONT_OPTIONS = {
   serif: { label: 'Classic Serif', family: 'Georgia, "Noto Serif", serif' },
   playfair: { label: 'Playfair Display', family: '"Playfair Display", Georgia, serif' },
@@ -107,17 +129,40 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
   // a fresh avartanam on the fly.
   const buildBlankRow = () => ({
     id: crypto.randomUUID(),
+    type: 'notation',
     beats: Array.from({ length: talamConfig.totalBeats }, (_, i) =>
       createBlankBeat(i + 1, currentSubdivisions)
     ),
     lyricLines: lineGroups.map((g) => Array((g.end - g.start + 1) * currentSubdivisions).fill('')),
   });
 
+  // A customizable subheader — just a short label the user types in, styled
+  // as a section break between rows (e.g. "Charanam", "Anupallavi 2").
+  const buildSubheaderRow = () => ({
+    id: crypto.randomUUID(),
+    type: 'subheader',
+    text: '',
+  });
+
+  // A blank vertical gap between rows, height adjustable per-instance.
+  const buildSpacerRow = () => ({
+    id: crypto.randomUUID(),
+    type: 'spacer',
+    height: SPACER_DEFAULT_PX,
+  });
+
+  const rowBuilders = { notation: buildBlankRow, subheader: buildSubheaderRow, spacer: buildSpacerRow };
+
+  // Rows saved before subheaders/spacers existed have no `type` at all —
+  // treat that (and any row explicitly marked 'notation') as a normal row.
+  const isNotationRow = (row) => !row || !row.type || row.type === 'notation';
+
   const [avartanams, setAvartanams] = useState(() =>
-    (initialNotation.avartanams || []).map((row) => ({
-      ...row,
-      lyricLines: migrateRowLyrics(row, lineGroups, currentSubdivisions),
-    }))
+    (initialNotation.avartanams || []).map((row) =>
+      (row.type && row.type !== 'notation')
+        ? row
+        : { ...row, type: 'notation', lyricLines: migrateRowLyrics(row, lineGroups, currentSubdivisions) }
+    )
   );
   const [selectedCell, setSelectedCell] = useState(null);
   const [lastTypedCell, setLastTypedCell] = useState(null);
@@ -129,38 +174,39 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
   const [docFont, setDocFont] = useState(initialNotation.docFont || 'serif');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
+  // Which row's "insert subheader/spacer" palette popover is currently open
+  // (an avartanam index), or null if none is.
+  const [rowPaletteFor, setRowPaletteFor] = useState(null);
   const fontFamily = FONT_OPTIONS[docFont]?.family || FONT_OPTIONS.serif.family;
 
   // --- MULTI-PAGE PAGINATION (Google-Docs-style) ---
-  // Every avartanam row renders with the same number of visual lines and the
-  // same note/lyric cell sizing, so all rows come out the same height — that
-  // means one measured sample row (plus one measured header) is enough to
-  // know how many rows fit on a page. Measured with ResizeObserver (via
-  // callback refs) rather than a one-shot effect, so it keeps itself correct
-  // even if something shifts the row's real height after the fact — a late
-  // web font swap, a browser zoom change, etc. — instead of latching onto
-  // whatever the first measurement happened to be.
-  const [measuredRowHeight, setMeasuredRowHeight] = useState(0);
+  // Page breaks are computed from real page geometry (paper size + known,
+  // fixed CSS dimensions of a row) rather than by measuring a live DOM row
+  // and hoping it settles before paint. That approach (tried twice before —
+  // see git history) was fragile: it depended on a ResizeObserver callback
+  // racing the first render, on "row 0" staying representative of every
+  // row, and on guessed fallback numbers — any of which could quietly
+  // under-count how much space a page's worth of rows would actually take,
+  // letting too many rows get assigned to one page. Since the page box only
+  // had a *min*-height, it then just stretched taller instead of ever
+  // starting a new page.
+  //
+  // Instead: every part of a row's height is either a fixed pixel value
+  // (NotationCell is hard-coded to h-[36px]; the lyrics strip's height is
+  // computed straight from `fontSize`) or a Tailwind rem-based utility,
+  // which is exactly ROOT_FONT_PX times its rem value since the app sets
+  // `html { font-size }` once, globally, itself (see index.css) — no
+  // observer needed to know it. That covers every talam/speed/kalai
+  // combination automatically through `lineGroups.length` (the number of
+  // visual lines one avartanam renders as, already computed from the talam
+  // config) — so this is inherently "regardless of what talam is used": a
+  // Rupaka row and a fast-speed Adi row with 4 line groups simply get 4x
+  // the per-line height, with no talam-specific logic here at all.
+  //
+  // The one true exception is the header: Ragam/Title/Composer are
+  // free-typed text that can wrap onto extra lines, and no fixed formula
+  // can predict that — so it's the only piece still measured live.
   const [measuredHeaderHeight, setMeasuredHeaderHeight] = useState(0);
-  const [measuredPagePadding, setMeasuredPagePadding] = useState(96);
-
-  const rowObserverRef = useRef(null);
-  const setRowRef = useCallback((node) => {
-    if (rowObserverRef.current) {
-      rowObserverRef.current.disconnect();
-      rowObserverRef.current = null;
-    }
-    if (node) {
-      const measure = () => {
-        const h = node.getBoundingClientRect().height;
-        if (h > 0) setMeasuredRowHeight(h);
-      };
-      measure();
-      const ro = new ResizeObserver(measure);
-      ro.observe(node);
-      rowObserverRef.current = ro;
-    }
-  }, []);
 
   const headerObserverRef = useRef(null);
   const setHeaderRef = useCallback((node) => {
@@ -181,16 +227,6 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
     }
   }, []);
 
-  // Page padding (from the p-12 class) only changes if the page's own CSS
-  // changes, never from row content — a single read on mount/attach is
-  // enough, no observer needed.
-  const setPageRef = useCallback((node) => {
-    if (!node) return;
-    const style = getComputedStyle(node);
-    const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
-    if (padding > 0) setMeasuredPagePadding(padding);
-  }, []);
-
   // Groups of absolute avartanam indices, one group per visible page. Page 1
   // has less room (the ragam/title/composer header eats into it), every
   // page after that gets the full page height.
@@ -199,34 +235,62 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
     if (total === 0) return [[]];
 
     const pageHeightPx = PAGE_HEIGHT_PX[paperSize] || PAGE_HEIGHT_PX.A4;
-    // Conservative fallbacks (biased toward splitting sooner rather than
-    // later) for the brief window before the ResizeObserver reports real
-    // numbers, so a first paint never crams everything onto one page.
-    const rowH = measuredRowHeight || 100;
+
+    // One visual line = the note row (fixed 36px) + the lyrics strip below
+    // it (mt-2 gap, its own height, pb-2 padding) — mirrors the
+    // exact markup in the DISPLAY GRID AREA below, line for line. A row is
+    // 1, 2, or 4 of these stacked depending on talam/speed (lineGroups).
+    const lyricsRowHeight = Math.max(9, fontSize - 2) + 10;
+    const perLineHeight = NOTE_ROW_PX + LINE_GAP_PX + lyricsRowHeight + LINE_PAD_BOTTOM_PX;
+    const numLines = Math.max(1, lineGroups.length);
+    // Lines within a row are separated by rowGap/2 (see the "SCORE BLOCKS
+    // LAYER SYSTEMS" wrapper below); rows themselves by the full rowGap.
+    const notationRowH = numLines * perLineHeight + (numLines - 1) * (rowGap / 2);
+
+    // Subheaders are a fixed single-line height; spacers carry their own
+    // adjustable height. Everything else is a normal notation row.
+    const rowHeightPx = (row) => {
+      if (row.type === 'subheader') return SUBHEADER_ROW_PX;
+      if (row.type === 'spacer') return row.height ?? SPACER_DEFAULT_PX;
+      return notationRowH;
+    };
+
     const headerH = measuredHeaderHeight || 110;
-    const padding = measuredPagePadding || 96;
     const footerReserve = 8;
 
-    const firstPageAvail = pageHeightPx - padding - headerH - footerReserve;
-    const otherPageAvail = pageHeightPx - padding - footerReserve;
-
-    const capacityFor = (available) => {
-      // n rows need n*rowH + (n-1)*rowGap of space.
-      return Math.max(1, Math.floor((available + rowGap) / (rowH + rowGap)));
-    };
+    const firstPageAvail = pageHeightPx - PAGE_PADDING_PX - headerH - footerReserve;
+    const otherPageAvail = pageHeightPx - PAGE_PADDING_PX - footerReserve;
 
     const groups = [];
     let idx = 0;
     let isFirstPage = true;
     while (idx < total) {
-      const capacity = capacityFor(isFirstPage ? firstPageAvail : otherPageAvail);
-      const end = Math.min(total, idx + capacity);
-      groups.push(Array.from({ length: end - idx }, (_, k) => idx + k));
-      idx = end;
+      const available = isFirstPage ? firstPageAvail : otherPageAvail;
+      let used = 0;
+      let count = 0;
+      while (idx + count < total) {
+        const h = rowHeightPx(avartanams[idx + count]);
+        const addition = count === 0 ? h : rowGap + h;
+        if (count > 0 && used + addition > available) break;
+        used += addition;
+        count++;
+      }
+      if (count === 0) count = 1; // always make progress, even if one row alone overflows a page
+      groups.push(Array.from({ length: count }, (_, k) => idx + k));
+      idx += count;
       isFirstPage = false;
     }
     return groups.length ? groups : [[]];
-  }, [avartanams.length, measuredRowHeight, measuredHeaderHeight, measuredPagePadding, paperSize, rowGap]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    avartanams.length,
+    avartanams.map((r) => `${r.type || 'n'}${r.type === 'spacer' ? ':' + (r.height ?? SPACER_DEFAULT_PX) : ''}`).join('|'),
+    lineGroups.length,
+    fontSize,
+    rowGap,
+    measuredHeaderHeight,
+    paperSize,
+  ]);
 
   // --- UNDO / REDO HISTORY (covers notes + lyrics, since both live on avartanams) ---
   const [history, setHistory] = useState(() => [JSON.parse(JSON.stringify(initialNotation.avartanams || []))]);
@@ -388,8 +452,12 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
       setSelectedCell({ aIdx, bIdx, cIdx: cIdx + 1 });
     } else if (bIdx < currentAvartanam.beats.length - 1) {
       setSelectedCell({ aIdx, bIdx: bIdx + 1, cIdx: 0 });
-    } else if (aIdx < avartanams.length - 1) {
-      setSelectedCell({ aIdx: aIdx + 1, bIdx: 0, cIdx: 0 });
+    } else {
+      // Skip past any subheader/spacer rows (they have no beats/cells) to
+      // land on the next actual notation row, if there is one.
+      let next = aIdx + 1;
+      while (next < avartanams.length && !isNotationRow(avartanams[next])) next++;
+      if (next < avartanams.length) setSelectedCell({ aIdx: next, bIdx: 0, cIdx: 0 });
     }
   }, [avartanams]);
 
@@ -408,12 +476,14 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
       }
     }
     if (aIdx > 0) {
-      const prevAvartanam = avartanams[aIdx - 1];
+      let prevIdx = aIdx - 1;
+      while (prevIdx >= 0 && !isNotationRow(avartanams[prevIdx])) prevIdx--;
+      const prevAvartanam = avartanams[prevIdx];
       if (prevAvartanam) {
         const lastBeatIdx = prevAvartanam.beats.length - 1;
         const lastBeat = prevAvartanam.beats[lastBeatIdx];
         if (lastBeat) {
-          return { aIdx: aIdx - 1, bIdx: lastBeatIdx, cIdx: lastBeat.cells.length - 1 };
+          return { aIdx: prevIdx, bIdx: lastBeatIdx, cIdx: lastBeat.cells.length - 1 };
         }
       }
     }
@@ -448,7 +518,11 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         e.preventDefault();
         const { aIdx, bIdx, cIdx } = selectedCell;
-        const targetAIdx = e.key === 'ArrowUp' ? aIdx - 1 : aIdx + 1;
+        const step = e.key === 'ArrowUp' ? -1 : 1;
+        let targetAIdx = aIdx + step;
+        while (targetAIdx >= 0 && targetAIdx < avartanams.length && !isNotationRow(avartanams[targetAIdx])) {
+          targetAIdx += step;
+        }
         const targetAvartanam = avartanams[targetAIdx];
         if (!targetAvartanam) return;
 
@@ -631,8 +705,8 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
   };
 
   // --- ROW OPERATIONS ---
-  const appendNewRow = () => {
-    setAvartanams([...avartanams, buildBlankRow()]);
+  const appendNewRow = (type = 'notation') => {
+    setAvartanams([...avartanams, (rowBuilders[type] || buildBlankRow)()]);
   };
 
   // Auto-append a new row when the user is on the last beat of the last row
@@ -643,10 +717,10 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
     }
   };
 
-  const insertRowAt = (index, position = 'below') => {
+  const insertRowAt = (index, position = 'below', type = 'notation') => {
     const updated = [...avartanams];
     const targetIndex = position === 'above' ? index : index + 1;
-    updated.splice(targetIndex, 0, buildBlankRow());
+    updated.splice(targetIndex, 0, (rowBuilders[type] || buildBlankRow)());
     setAvartanams(updated);
     setSelectedCell(null);
     setLastTypedCell(null);
@@ -658,6 +732,18 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
     setSelectedCell(null);
     setLastTypedCell(null);
   };
+
+  // Patches a subheader's text or a spacer's height in place.
+  const updateSpecialRow = (index, patch) => {
+    setAvartanams(prev => {
+      const updated = [...prev];
+      if (!updated[index]) return prev;
+      updated[index] = { ...updated[index], ...patch };
+      return updated;
+    });
+  };
+
+  const clampSpacerHeight = (n) => Math.min(SPACER_MAX_PX, Math.max(SPACER_MIN_PX, n));
 
   const clearAllNotes = () => {
     if (avartanams.length === 0) return;
@@ -792,7 +878,10 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
         { label: 'Undo', onClick: undo, shortcut: '⌘Z', disabled: !canUndo },
         { label: 'Redo', onClick: redo, shortcut: '⇧⌘Z', disabled: !canRedo },
         { divider: true },
-        { label: 'Append Row', onClick: appendNewRow },
+        { label: 'Append Row', onClick: () => appendNewRow('notation') },
+        { label: 'Append Subheader', onClick: () => appendNewRow('subheader') },
+        { label: 'Append Spacer', onClick: () => appendNewRow('spacer') },
+        { divider: true },
         { label: 'Clear All Notes…', onClick: clearAllNotes, disabled: avartanams.length === 0 },
       ],
     },
@@ -1045,20 +1134,31 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
         <main className="flex-1 bg-tambura-800 p-8 overflow-auto print:bg-white print:p-0 print:overflow-visible">
           
           <div className="relative flex flex-col items-center gap-8 mx-auto w-fit print:w-full print:mx-0 print:gap-0">
-            {pageGroups.map((group, pageIdx) => (
+            {pageGroups.map((group, pageIdx) => {
+            const isLastPage = pageIdx === pageGroups.length - 1;
+            return (
             <React.Fragment key={pageIdx}>
             <div 
               id={pageIdx === 0 ? 'notation-paper' : undefined}
-              ref={pageIdx === 0 ? setPageRef : undefined}
-              className={`bg-white text-tambura-900 p-12 shadow-2xl rounded-sm flex flex-col items-stretch relative print:shadow-none print:p-0 print:w-full ${
-                paperSize === 'Letter' ? 'w-[8.5in] min-h-[11in]' : 'w-[210mm] min-h-[297mm]'
+              className={`bg-white text-tambura-900 p-12 shadow-2xl rounded-sm flex flex-col items-stretch relative print:shadow-none ${
+                paperSize === 'Letter' ? 'w-[8.5in]' : 'w-[210mm]'
+              } ${
+                // Every page except the last is locked to the exact
+                // physical page height and clips anything past it — a hard
+                // guarantee that a page can never visually stretch, no
+                // matter what. The last page keeps a *min*-height instead
+                // so the "append row" affordance below the content still
+                // has room to sit under a short final page.
+                isLastPage
+                  ? (paperSize === 'Letter' ? 'min-h-[11in]' : 'min-h-[297mm]')
+                  : (paperSize === 'Letter' ? 'h-[11in] overflow-hidden' : 'h-[297mm] overflow-hidden')
               } ${pageIdx > 0 ? 'print:break-before-page' : ''}`}
-              onClick={() => { setSelectedCell(null); setLastTypedCell(null); }}
+              onClick={() => { setSelectedCell(null); setLastTypedCell(null); setRowPaletteFor(null); }}
             >
               {/* DOCUMENT AUTO-ADAPTING HEADER — only on the first page, like a
                   real score sheet's title block; later pages are pure content. */}
               {pageIdx === 0 && (
-              <div ref={setHeaderRef} className="w-full flex justify-between items-start mb-8 border-b border-tambura-400 pb-4 gap-4 text-xs h-auto shrink-0" onClick={(e) => e.stopPropagation()}>
+              <div ref={setHeaderRef} className="w-full flex justify-between items-start mb-4 border-b border-tambura-400 pb-4 gap-4 text-xs h-auto shrink-0" onClick={(e) => e.stopPropagation()}>
                 <div className="w-1/3 flex flex-col items-start">
                   <span className="text-[9px] font-mono text-tambura-400 uppercase tracking-wider block mb-1">Ragam</span>
                   <AutoResizeTextarea 
@@ -1092,32 +1192,113 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
               </div>
               )}
 
-              {/* EMPTY STATE */}
-              {pageIdx === 0 && avartanams.length === 0 && (
-                <div className="flex flex-col items-center justify-center my-auto border-2 border-dashed border-tambura-200 p-12 rounded-lg text-center print:hidden">
-                  <p className="text-tambura-400 italic text-sm mb-4">Your score sheet is empty.</p>
-                  <button onClick={appendNewRow} className="bg-gold-600 hover:bg-gold-700 text-white font-semibold text-xs py-2 px-5 rounded-md shadow active:scale-95 transition-all duration-150">
-                    Create First Line
-                  </button>
-                </div>
-              )}
-
               {/* DISPLAY GRID AREA */}
               <div className="flex flex-col w-full items-start" style={{ gap: `${rowGap}px` }}>
                 {group.map((aIdx) => {
                   const avartanam = avartanams[aIdx];
+                  // Subheader/spacer rows are exactly one thing top-to-bottom,
+                  // so centering the dock on the whole row centers it on
+                  // their content too. Notation rows are taller than what
+                  // they visually read as "the row" — a first line of note
+                  // boxes (NOTE_ROW_PX tall) with a lyrics strip, and
+                  // possibly more lines, stacked underneath. The dock should
+                  // stay level with that first line of boxes, not drift down
+                  // to the midpoint of everything stacked below it.
+                  const dockTop = (avartanam.type === 'subheader' || avartanam.type === 'spacer')
+                    ? '50%'
+                    : `${NOTE_ROW_PX / 2}px`;
                   return (
-                  <div key={avartanam.id} ref={aIdx === 0 ? setRowRef : undefined} className="relative w-full group/row flex flex-col items-start animate-fade-in-up">
+                  <div key={avartanam.id} className="relative w-full group/row flex flex-col items-start animate-fade-in-up">
                     
-                    {/* BUTTON FLOATER DOCK */}
-                    <div className="absolute right-[102%] top-2 bg-tambura-950 border border-tambura-700 rounded shadow-md opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 print:hidden p-0.5 gap-0.5 z-20 flex items-center" onClick={(e) => e.stopPropagation()}>
-                      <button title="Insert row above" aria-label="Insert row above" onClick={(e) => { e.stopPropagation(); insertRowAt(aIdx, 'above'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">+↑</button>
-                      <button title="Insert row below" aria-label="Insert row below" onClick={(e) => { e.stopPropagation(); insertRowAt(aIdx, 'below'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">+↓</button>
-                      <div className="w-[1px] h-3 bg-tambura-700 mx-0.5" />
-                      <button title="Delete row" aria-label="Delete row" onClick={(e) => { e.stopPropagation(); deleteRowAt(aIdx); }} className="text-[10px] font-bold w-5 h-5 text-rose-400 hover:bg-rose-600 hover:text-white rounded flex items-center justify-center">×</button>
+                    {/* BUTTON FLOATER DOCK — anchored (via dockTop, see
+                        above) to the vertical center of whichever content it
+                        should read as "in line with": the full row for
+                        subheader/spacer rows, or just the first note-grid
+                        line for notation rows. The insert palette lives
+                        inside this same wrapper, stacked below the dock in
+                        normal flow, so the two always stay attached to each
+                        other. */}
+                    <div className="absolute right-[102%] -translate-y-1/2 z-20 flex flex-col items-end gap-1 print:hidden" style={{ top: dockTop }}>
+                      <div className={`bg-tambura-950 border border-tambura-700 rounded-lg shadow-md transition-opacity duration-150 p-1 gap-1 flex items-center ${rowPaletteFor === aIdx ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100'}`} onClick={(e) => e.stopPropagation()}>
+                        <button title="Insert notation row above" aria-label="Insert notation row above" onClick={(e) => { e.stopPropagation(); insertRowAt(aIdx, 'above'); }} className="text-xs font-mono font-bold w-7 h-7 text-tambura-300 hover:bg-gold-600 hover:text-white rounded-md flex items-center justify-center">+↑</button>
+                        <button title="Insert notation row below" aria-label="Insert notation row below" onClick={(e) => { e.stopPropagation(); insertRowAt(aIdx, 'below'); }} className="text-xs font-mono font-bold w-7 h-7 text-tambura-300 hover:bg-gold-600 hover:text-white rounded-md flex items-center justify-center">+↓</button>
+                        <div className="w-[1px] h-4 bg-tambura-700 mx-0.5" />
+                        <button
+                          title="Insert subheader or spacer…"
+                          aria-label="Insert subheader or spacer"
+                          onClick={(e) => { e.stopPropagation(); setRowPaletteFor(rowPaletteFor === aIdx ? null : aIdx); }}
+                          className={`text-xs font-bold w-7 h-7 rounded-md flex items-center justify-center ${rowPaletteFor === aIdx ? 'bg-gold-600 text-white' : 'text-tambura-300 hover:bg-gold-600 hover:text-white'}`}
+                        >
+                          ▾
+                        </button>
+                        <div className="w-[1px] h-4 bg-tambura-700 mx-0.5" />
+                        <button title="Delete row" aria-label="Delete row" onClick={(e) => { e.stopPropagation(); deleteRowAt(aIdx); }} className="text-sm font-bold w-7 h-7 text-rose-400 hover:bg-rose-600 hover:text-white rounded-md flex items-center justify-center">×</button>
+                      </div>
+
+                      {/* ROW-TYPE INSERT PALETTE — offers subheaders/spacers,
+                          which are common enough to insert but too situational
+                          to earn their own always-visible buttons. */}
+                      {rowPaletteFor === aIdx && (
+                        <div
+                          className="bg-tambura-950 border border-tambura-700 rounded-lg shadow-md flex flex-col p-1 w-40 gap-0.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <span className="text-[9px] font-mono uppercase tracking-wider text-tambura-500 px-2 pt-1 pb-0.5">Insert above</span>
+                          <button onClick={() => { insertRowAt(aIdx, 'above', 'subheader'); setRowPaletteFor(null); }} className="text-left text-xs font-semibold px-2 py-1.5 rounded text-tambura-200 hover:bg-gold-600 hover:text-white">Subheader</button>
+                          <button onClick={() => { insertRowAt(aIdx, 'above', 'spacer'); setRowPaletteFor(null); }} className="text-left text-xs font-semibold px-2 py-1.5 rounded text-tambura-200 hover:bg-gold-600 hover:text-white">Spacer</button>
+                          <div className="h-[1px] bg-tambura-700 my-0.5" />
+                          <span className="text-[9px] font-mono uppercase tracking-wider text-tambura-500 px-2 pb-0.5">Insert below</span>
+                          <button onClick={() => { insertRowAt(aIdx, 'below', 'subheader'); setRowPaletteFor(null); }} className="text-left text-xs font-semibold px-2 py-1.5 rounded text-tambura-200 hover:bg-gold-600 hover:text-white">Subheader</button>
+                          <button onClick={() => { insertRowAt(aIdx, 'below', 'spacer'); setRowPaletteFor(null); }} className="text-left text-xs font-semibold px-2 py-1.5 rounded text-tambura-200 hover:bg-gold-600 hover:text-white">Spacer</button>
+                        </div>
+                      )}
                     </div>
 
-                    {/* SCORE BLOCKS LAYER SYSTEMS */}
+                    {avartanam.type === 'subheader' ? (
+                      /* SUBHEADER ROW — a plain, customizable, left-aligned
+                         section label. */
+                      <div className="w-full flex items-center" style={{ height: `${SUBHEADER_ROW_PX}px` }} onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="text"
+                          value={avartanam.text || ''}
+                          onChange={(e) => updateSpecialRow(aIdx, { text: e.target.value })}
+                          placeholder="Section title…"
+                          style={{ fontFamily }}
+                          className="w-full text-left font-bold tracking-wide text-tambura-700 bg-transparent focus:outline-none focus:bg-tambura-50 rounded px-2 py-0.5 text-sm placeholder-tambura-300"
+                        />
+                      </div>
+                    ) : avartanam.type === 'spacer' ? (
+                      /* SPACER ROW — a blank vertical gap; height is
+                         adjustable via the hover-revealed stepper. */
+                      <div
+                        className="relative w-full group/spacer"
+                        style={{ height: `${avartanam.height ?? SPACER_DEFAULT_PX}px` }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="absolute inset-0 flex items-center justify-center gap-2 print:hidden opacity-0 group-hover/spacer:opacity-100 transition-opacity duration-150">
+                          <div className="flex-1 border-t border-dashed border-tambura-200" />
+                          <button
+                            title="Shrink spacer"
+                            aria-label="Shrink spacer"
+                            onClick={() => updateSpecialRow(aIdx, { height: clampSpacerHeight((avartanam.height ?? SPACER_DEFAULT_PX) - SPACER_STEP_PX) })}
+                            className="text-[11px] font-bold w-5 h-5 shrink-0 text-tambura-400 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center border border-tambura-200"
+                          >
+                            −
+                          </button>
+                          <span className="text-[10px] font-mono text-tambura-400 select-none shrink-0">{avartanam.height ?? SPACER_DEFAULT_PX}px spacer</span>
+                          <button
+                            title="Grow spacer"
+                            aria-label="Grow spacer"
+                            onClick={() => updateSpecialRow(aIdx, { height: clampSpacerHeight((avartanam.height ?? SPACER_DEFAULT_PX) + SPACER_STEP_PX) })}
+                            className="text-[11px] font-bold w-5 h-5 shrink-0 text-tambura-400 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center border border-tambura-200"
+                          >
+                            +
+                          </button>
+                          <div className="flex-1 border-t border-dashed border-tambura-200" />
+                        </div>
+                      </div>
+                    ) : (
+                    /* SCORE BLOCKS LAYER SYSTEMS */
                     <div className="flex flex-col w-full items-start" style={{ gap: `${rowGap / 2}px` }}>
                       {getVisualLines(avartanam).map((line) => {
                         let totalCellCounter = 0;
@@ -1127,7 +1308,7 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
                         const rowLineId = `${avartanam.id}-${line.lineId}`;
 
                         return (
-                          <div key={line.lineId} className="flex flex-col w-full items-stretch border-b border-tambura-100/70 pb-2 print:border-b-tambura-200">
+                          <div key={line.lineId} className="flex flex-col w-full items-stretch pb-2">
                             
                             {/* NOTE GRID BLOCK */}
                             <div className="flex items-start justify-between w-full bg-white">
@@ -1251,6 +1432,7 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
                         );
                       })}
                     </div>
+                    )}
 
                   </div>
                   );
@@ -1259,10 +1441,16 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
 
               {/* BOTTOM APPEND BAR — only after the very last row on the very
                   last page, so it never shows up mid-document. */}
-              {pageIdx === pageGroups.length - 1 && avartanams.length > 0 && (
-                <div className="mt-12 flex justify-center print:hidden border-t border-dashed border-tambura-200 pt-6">
-                  <button onClick={appendNewRow} className="bg-tambura-100 hover:bg-gold-50 border border-tambura-300 hover:border-gold-300 text-tambura-700 hover:text-gold-600 font-bold text-xs py-2 px-8 rounded-md shadow-sm active:scale-95 transition-all duration-150">
-                    + Append Row to Bottom
+              {isLastPage && (
+                <div className="mt-12 flex justify-center items-center gap-2 print:hidden border-t border-dashed border-tambura-200 pt-6">
+                  <button onClick={() => appendNewRow('notation')} className="bg-tambura-100 hover:bg-gold-50 border border-tambura-300 hover:border-gold-300 text-tambura-700 hover:text-gold-600 font-bold text-xs py-2 px-8 rounded-md shadow-sm active:scale-95 transition-all duration-150">
+                    + Append Row
+                  </button>
+                  <button onClick={() => appendNewRow('subheader')} title="Append a subheader" className="bg-tambura-100 hover:bg-gold-50 border border-tambura-300 hover:border-gold-300 text-tambura-700 hover:text-gold-600 font-bold text-xs py-2 px-5 rounded-md shadow-sm active:scale-95 transition-all duration-150">
+                    + Subheader
+                  </button>
+                  <button onClick={() => appendNewRow('spacer')} title="Append a spacer" className="bg-tambura-100 hover:bg-gold-50 border border-tambura-300 hover:border-gold-300 text-tambura-700 hover:text-gold-600 font-bold text-xs py-2 px-5 rounded-md shadow-sm active:scale-95 transition-all duration-150">
+                    + Spacer
                   </button>
                 </div>
               )}
@@ -1278,7 +1466,8 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
               </div>
             )}
             </React.Fragment>
-            ))}
+            );
+            })}
           </div>
         </main>
       </div>
