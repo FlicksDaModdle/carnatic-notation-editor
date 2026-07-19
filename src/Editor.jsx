@@ -76,6 +76,7 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
   const [selectedTalam] = useState(initialNotation.selectedTalam || 'ADI');
   const [speed] = useState(initialNotation.speed || 1);
   const [kalai] = useState(initialNotation.kalai || 1);
+  const [paperSize] = useState(initialNotation.paperSize || 'A4');
   const [title, setTitle] = useState(initialNotation.title || '');
   const [ragam, setRagam] = useState(initialNotation.ragam || '');
   const [composer, setComposer] = useState(initialNotation.composer || '');
@@ -185,6 +186,7 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
     selectedTalam,
     speed,
     kalai,
+    paperSize,
     avartanams,
     fontSize,
     cellGap,
@@ -199,7 +201,7 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
     setHasSaved(true);
     setSaveStatus('saved');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notationId, title, ragam, composer, selectedTalam, speed, kalai, avartanams, fontSize, cellGap, rowGap, docFont, createdAt]);
+  }, [notationId, title, ragam, composer, selectedTalam, speed, kalai, paperSize, avartanams, fontSize, cellGap, rowGap, docFont, createdAt]);
 
   useEffect(() => {
     if (isFirstRenderRef.current) {
@@ -406,6 +408,9 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
         setAvartanams(updated);
         setSelectedCell({ aIdx: aIdx + 1, bIdx: 0, cIdx: 0 });
         setLastTypedCell(null);
+        
+        // If we're on the very last row, auto-add another blank page's worth
+        ensureRowAfterCurrent(aIdx + 1);
         return;
       }
 
@@ -523,6 +528,14 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
   // --- ROW OPERATIONS ---
   const appendNewRow = () => {
     setAvartanams([...avartanams, buildBlankRow()]);
+  };
+
+  // Auto-append a new row when the user is on the last beat of the last row
+  // and types Enter — this keeps the flow going without manual intervention.
+  const ensureRowAfterCurrent = (currentAIdx) => {
+    if (currentAIdx === avartanams.length - 1) {
+      setAvartanams(prev => [...prev, buildBlankRow()]);
+    }
   };
 
   const insertRowAt = (index, position = 'below') => {
@@ -930,7 +943,9 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
             
             <div 
               id="notation-paper" 
-              className="w-[210mm] min-h-[297mm] bg-white text-tambura-900 p-12 shadow-2xl rounded-sm flex flex-col items-stretch relative print:shadow-none print:p-0 print:w-full"
+              className={`bg-white text-tambura-900 p-12 shadow-2xl rounded-sm flex flex-col items-stretch relative print:shadow-none print:p-0 print:w-full ${
+                paperSize === 'Letter' ? 'w-[8.5in] min-h-[11in]' : 'w-[210mm] min-h-[297mm]'
+              }`}
               onClick={() => { setSelectedCell(null); setLastTypedCell(null); }}
             >
               {/* DOCUMENT AUTO-ADAPTING HEADER */}

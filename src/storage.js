@@ -142,12 +142,13 @@ export function createBlankNotation(id, overrides = {}) {
   const now = Date.now();
   return {
     id: id || crypto.randomUUID(),
-    title: 'Untitled Notation',
-    ragam: '',
-    composer: '',
+    title: overrides.title || 'Untitled Notation',
+    ragam: overrides.ragam || '',
+    composer: overrides.composer || '',
     selectedTalam: overrides.selectedTalam || 'ADI',
     speed: overrides.speed || 1,
     kalai: overrides.kalai || 1,
+    paperSize: overrides.paperSize || 'A4',
     avartanams: [],
     ...DEFAULT_LAYOUT,
     createdAt: now,
