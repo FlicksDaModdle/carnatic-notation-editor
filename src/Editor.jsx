@@ -98,17 +98,39 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
   // a fresh avartanam on the fly.
   const buildBlankRow = () => ({
     id: crypto.randomUUID(),
+    type: 'row',
     beats: Array.from({ length: talamConfig.totalBeats }, (_, i) =>
       createBlankBeat(i + 1, currentSubdivisions)
     ),
     lyricLines: lineGroups.map((g) => Array((g.end - g.start + 1) * currentSubdivisions).fill('')),
   });
 
+  const buildBlankSubheading = (text = '') => ({
+    id: crypto.randomUUID(),
+    type: 'subheading',
+    text,
+  });
+
+  const buildBlankSpacer = () => ({
+    id: crypto.randomUUID(),
+    type: 'spacer',
+  });
+
   const [avartanams, setAvartanams] = useState(() =>
-    (initialNotation.avartanams || []).map((row) => ({
-      ...row,
-      lyricLines: migrateRowLyrics(row, lineGroups, currentSubdivisions),
-    }))
+    (initialNotation.avartanams || []).map((row) => {
+      // Migrate existing rows without a type field to 'row' type
+      if (!row.type) {
+        return {
+          ...row,
+          type: 'row',
+          lyricLines: migrateRowLyrics(row, lineGroups, currentSubdivisions),
+        };
+      }
+      return {
+        ...row,
+        lyricLines: row.lyricLines ? migrateRowLyrics(row, lineGroups, currentSubdivisions) : undefined,
+      };
+    })
   );
   const [selectedCell, setSelectedCell] = useState(null);
   const [lastTypedCell, setLastTypedCell] = useState(null);
@@ -534,11 +556,33 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
     setLastTypedCell(null);
   };
 
-  const deleteRowAt = (index) => {
+  const insertSubheadingAt = (index, position = 'below') => {
+    const updated = [...avartanams];
+    const targetIndex = position === 'above' ? index : index + 1;
+    updated.splice(targetIndex, 0, buildBlankSubheading(''));
+    setAvartanams(updated);
+  };
+
+  const insertSpacerAt = (index, position = 'below') => {
+    const updated = [...avartanams];
+    const targetIndex = position === 'above' ? index : index + 1;
+    updated.splice(targetIndex, 0, buildBlankSpacer());
+    setAvartanams(updated);
+  };
+
+  const deleteItemAt = (index) => {
     const updated = avartanams.filter((_, idx) => idx !== index);
     setAvartanams(updated);
     setSelectedCell(null);
     setLastTypedCell(null);
+  };
+
+  const updateSubheadingText = (index, text) => {
+    const updated = [...avartanams];
+    if (updated[index] && updated[index].type === 'subheading') {
+      updated[index].text = text;
+      setAvartanams(updated);
+    }
   };
 
   const clearAllNotes = () => {
@@ -861,7 +905,45 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
 
           {/* PALETTE PANEL */}
           <div className="p-4 flex-1 flex flex-col gap-4">
-            <div className="text-xs font-bold uppercase tracking-wider text-tambura-400">Modifiers</div>
+            {/* ROW INSERTION TOOLS */}
+            <div className="text-xs font-bold uppercase tracking-wider text-gold-400 mb-1">Insert Elements</div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => appendNewRow()}
+                className="w-full p-2 text-xs font-semibold bg-tambura-900 border border-tambura-800 hover:bg-gold-950 hover:border-gold-600 rounded text-center text-tambura-200 transition-colors duration-150"
+              >
+                + Add Music Row at Bottom
+              </button>
+              <button
+                onClick={() => {
+                  const lastIdx = avartanams.length - 1;
+                  if (lastIdx >= 0) {
+                    insertSubheadingAt(lastIdx, 'below');
+                  } else {
+                    setAvartanams([buildBlankSubheading('')]);
+                  }
+                }}
+                className="w-full p-2 text-xs font-semibold bg-tambura-900 border border-tambura-800 hover:bg-gold-950 hover:border-gold-600 rounded text-center text-tambura-200 transition-colors duration-150"
+              >
+                + Add Subheading at Bottom
+              </button>
+              <button
+                onClick={() => {
+                  const lastIdx = avartanams.length - 1;
+                  if (lastIdx >= 0) {
+                    insertSpacerAt(lastIdx, 'below');
+                  } else {
+                    setAvartanams([buildBlankSpacer()]);
+                  }
+                }}
+                className="w-full p-2 text-xs font-semibold bg-tambura-900 border border-tambura-800 hover:bg-gold-950 hover:border-gold-600 rounded text-center text-tambura-200 transition-colors duration-150"
+              >
+                + Add Empty Space at Bottom
+              </button>
+            </div>
+
+            <div className="pt-4 border-t border-tambura-800">
+              <div className="text-xs font-bold uppercase tracking-wider text-tambura-400">Modifiers</div>
             <div>
               <span className="text-[10px] text-tambura-500 uppercase font-bold block mb-1.5">Sthayi / Octave Dots</span>
               <div className="grid grid-cols-2 gap-1.5">
@@ -980,15 +1062,69 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
 
               {/* DISPLAY GRID AREA */}
               <div className="flex flex-col w-full items-start" style={{ gap: `${rowGap}px` }}>
-                {avartanams.map((avartanam, aIdx) => (
+                {avartanams.map((avartanam, aIdx) => {
+                  const isRow = avartanam.type === 'row' || !avartanam.type;
+                  const isSubheading = avartanam.type === 'subheading';
+                  const isSpacer = avartanam.type === 'spacer';
+
+                  if (isSpacer) {
+                    return (
+                      <div key={avartanam.id} className="relative w-full group/row flex flex-col items-start animate-fade-in-up">
+                        <div className="absolute right-[102%] top-2 bg-tambura-950 border border-tambura-700 rounded shadow-md opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 print:hidden p-0.5 gap-0.5 z-20 flex items-center" onClick={(e) => e.stopPropagation()}>
+                          <button title="Insert subheading above" aria-label="Insert subheading above" onClick={(e) => { e.stopPropagation(); insertSubheadingAt(aIdx, 'above'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">H↑</button>
+                          <button title="Insert spacer above" aria-label="Insert spacer above" onClick={(e) => { e.stopPropagation(); insertSpacerAt(aIdx, 'above'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">S↑</button>
+                          <div className="w-[1px] h-3 bg-tambura-700 mx-0.5" />
+                          <button title="Insert subheading below" aria-label="Insert subheading below" onClick={(e) => { e.stopPropagation(); insertSubheadingAt(aIdx, 'below'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">H↓</button>
+                          <button title="Insert spacer below" aria-label="Insert spacer below" onClick={(e) => { e.stopPropagation(); insertSpacerAt(aIdx, 'below'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">S↓</button>
+                          <div className="w-[1px] h-3 bg-tambura-700 mx-0.5" />
+                          <button title="Delete empty space" aria-label="Delete empty space" onClick={(e) => { e.stopPropagation(); deleteItemAt(aIdx); }} className="text-[10px] font-bold w-5 h-5 text-rose-400 hover:bg-rose-600 hover:text-white rounded flex items-center justify-center">×</button>
+                        </div>
+                        <div className="w-full" style={{ height: `${rowGap * 1.5}px` }}></div>
+                      </div>
+                    );
+                  }
+
+                  if (isSubheading) {
+                    return (
+                      <div key={avartanam.id} className="relative w-full group/row flex flex-col items-start animate-fade-in-up">
+                        <div className="absolute right-[102%] top-2 bg-tambura-950 border border-tambura-700 rounded shadow-md opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 print:hidden p-0.5 gap-0.5 z-20 flex items-center" onClick={(e) => e.stopPropagation()}>
+                          <button title="Insert row above" aria-label="Insert row above" onClick={(e) => { e.stopPropagation(); insertRowAt(aIdx, 'above'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">+↑</button>
+                          <button title="Insert subheading above" aria-label="Insert subheading above" onClick={(e) => { e.stopPropagation(); insertSubheadingAt(aIdx, 'above'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">H↑</button>
+                          <button title="Insert spacer above" aria-label="Insert spacer above" onClick={(e) => { e.stopPropagation(); insertSpacerAt(aIdx, 'above'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">S↑</button>
+                          <div className="w-[1px] h-3 bg-tambura-700 mx-0.5" />
+                          <button title="Insert row below" aria-label="Insert row below" onClick={(e) => { e.stopPropagation(); insertRowAt(aIdx, 'below'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">+↓</button>
+                          <button title="Insert subheading below" aria-label="Insert subheading below" onClick={(e) => { e.stopPropagation(); insertSubheadingAt(aIdx, 'below'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">H↓</button>
+                          <button title="Insert spacer below" aria-label="Insert spacer below" onClick={(e) => { e.stopPropagation(); insertSpacerAt(aIdx, 'below'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">S↓</button>
+                          <div className="w-[1px] h-3 bg-tambura-700 mx-0.5" />
+                          <button title="Delete subheading" aria-label="Delete subheading" onClick={(e) => { e.stopPropagation(); deleteItemAt(aIdx); }} className="text-[10px] font-bold w-5 h-5 text-rose-400 hover:bg-rose-600 hover:text-white rounded flex items-center justify-center">×</button>
+                        </div>
+                        <div className="w-full py-2">
+                          <input
+                            type="text"
+                            value={avartanam.text || ''}
+                            onChange={(e) => updateSubheadingText(aIdx, e.target.value)}
+                            placeholder="Enter subheading..."
+                            className="w-full bg-transparent border-none outline-none text-lg font-bold text-tambura-800 placeholder-tambura-400"
+                          />
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
                   <div key={avartanam.id} className="relative w-full group/row flex flex-col items-start animate-fade-in-up">
                     
                     {/* BUTTON FLOATER DOCK */}
                     <div className="absolute right-[102%] top-2 bg-tambura-950 border border-tambura-700 rounded shadow-md opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 print:hidden p-0.5 gap-0.5 z-20 flex items-center" onClick={(e) => e.stopPropagation()}>
                       <button title="Insert row above" aria-label="Insert row above" onClick={(e) => { e.stopPropagation(); insertRowAt(aIdx, 'above'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">+↑</button>
-                      <button title="Insert row below" aria-label="Insert row below" onClick={(e) => { e.stopPropagation(); insertRowAt(aIdx, 'below'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">+↓</button>
+                      <button title="Insert subheading above" aria-label="Insert subheading above" onClick={(e) => { e.stopPropagation(); insertSubheadingAt(aIdx, 'above'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">H↑</button>
+                      <button title="Insert spacer above" aria-label="Insert spacer above" onClick={(e) => { e.stopPropagation(); insertSpacerAt(aIdx, 'above'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">S↑</button>
                       <div className="w-[1px] h-3 bg-tambura-700 mx-0.5" />
-                      <button title="Delete row" aria-label="Delete row" onClick={(e) => { e.stopPropagation(); deleteRowAt(aIdx); }} className="text-[10px] font-bold w-5 h-5 text-rose-400 hover:bg-rose-600 hover:text-white rounded flex items-center justify-center">×</button>
+                      <button title="Insert row below" aria-label="Insert row below" onClick={(e) => { e.stopPropagation(); insertRowAt(aIdx, 'below'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">+↓</button>
+                      <button title="Insert subheading below" aria-label="Insert subheading below" onClick={(e) => { e.stopPropagation(); insertSubheadingAt(aIdx, 'below'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">H↓</button>
+                      <button title="Insert spacer below" aria-label="Insert spacer below" onClick={(e) => { e.stopPropagation(); insertSpacerAt(aIdx, 'below'); }} className="text-[10px] font-mono font-bold w-5 h-5 text-tambura-300 hover:bg-gold-600 hover:text-white rounded flex items-center justify-center">S↓</button>
+                      <div className="w-[1px] h-3 bg-tambura-700 mx-0.5" />
+                      <button title="Delete row" aria-label="Delete row" onClick={(e) => { e.stopPropagation(); deleteItemAt(aIdx); }} className="text-[10px] font-bold w-5 h-5 text-rose-400 hover:bg-rose-600 hover:text-white rounded flex items-center justify-center">×</button>
                     </div>
 
                     {/* SCORE BLOCKS LAYER SYSTEMS */}
