@@ -4,8 +4,8 @@ import { getTalamConfig, createBlankBeat, computeLineGroups, migrateRowLyrics } 
 import NotationCell from './NotationCell';
 import MenuBar from './MenuBar';
 import KeyboardHelp from './KeyboardHelp';
-import { getNotation, saveNotation, createBlankNotation } from './storage';
-import { UndoIcon, RedoIcon, SaveIcon, SidebarIcon, HelpIcon, PrinterIcon, ChevronLeftIcon, ChevronRightIcon, HomeIcon } from './icons';
+import { getNotation, saveNotation, createBlankNotation, toNotationFile, NOTATION_FILE_EXTENSION } from './storage';
+import { UndoIcon, RedoIcon, SaveIcon, SidebarIcon, HelpIcon, PrinterIcon, DownloadIcon, ChevronLeftIcon, ChevronRightIcon, HomeIcon } from './icons';
 import Logo from './Logo';
 
 function AutoResizeTextarea({ value, onChange, className, placeholder, rows = 1, style }) {
@@ -371,6 +371,23 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
     setSaveStatus('saved');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notationId, title, ragam, composer, selectedTalam, speed, kalai, paperSize, avartanams, fontSize, cellGap, rowGap, docFont, createdAt]);
+
+  // Downloads the current notation as a standalone .kriti file — the
+  // proprietary export format (see storage.js) that can be moved off this
+  // browser and re-imported from the Home screen later to keep editing.
+  const handleExportFile = () => {
+    const fileData = toNotationFile(buildSnapshot());
+    const blob = new Blob([JSON.stringify(fileData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const safeName = (title || 'Untitled Notation').replace(/[\\/:*?"<>|]+/g, '').trim() || 'Untitled Notation';
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${safeName}${NOTATION_FILE_EXTENSION}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   useEffect(() => {
     if (isFirstRenderRef.current) {
@@ -858,6 +875,7 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
         { label: 'Duplicate Notation', onClick: () => onDuplicate?.(notationId), disabled: !hasSaved },
         { divider: true },
         { label: 'Print / Export PDF', onClick: () => window.print(), shortcut: '⌘P' },
+        { label: `Export Notation File (${NOTATION_FILE_EXTENSION})`, onClick: handleExportFile },
         { divider: true },
         { label: 'Back to Home', onClick: handleExit },
         { divider: true },
@@ -983,6 +1001,9 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
             </ToolbarButton>
             <ToolbarButton onClick={() => window.print()} label="Print / Export PDF" shortcut="⌘P">
               <PrinterIcon className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton onClick={handleExportFile} label={`Export Notation File (${NOTATION_FILE_EXTENSION})`}>
+              <DownloadIcon className="w-4 h-4" />
             </ToolbarButton>
 
             <div className="w-px h-4 bg-tambura-800 mx-1.5" />

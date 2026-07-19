@@ -1,6 +1,6 @@
 // src/Home.jsx
-import { useState } from 'react';
-import { listNotations, deleteNotation, duplicateNotation } from './storage';
+import { useRef, useState } from 'react';
+import { listNotations, deleteNotation, duplicateNotation, importNotationFile, NOTATION_FILE_EXTENSION } from './storage';
 import { getAllTalams } from './talamTemplates';
 import Logo from './Logo';
 
@@ -26,12 +26,34 @@ function countCells(notation) {
 function Home({ onOpen, onCreateNew, onManageTalams }) {
   const [notations, setNotations] = useState(() => listNotations());
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [importError, setImportError] = useState(null);
+  const importInputRef = useRef(null);
   const allTalams = getAllTalams();
 
   const refresh = () => setNotations(listNotations());
 
   const handleCreate = () => {
     onCreateNew();
+  };
+
+  // "Import Notation" — the reverse of the editor's File → Export Notation
+  // File. Reads a previously-exported .kriti file back in as a brand-new
+  // saved notation (fresh id, so it can never collide with or overwrite
+  // anything already here), then jumps straight into editing it.
+  const handleImportClick = () => importInputRef.current?.click();
+
+  const handleImportFileChosen = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file later
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const imported = importNotationFile(text);
+      refresh();
+      onOpen(imported.id);
+    } catch (err) {
+      setImportError(err.message || 'That file could not be imported.');
+    }
   };
 
   const handleDelete = (id) => {
@@ -68,6 +90,20 @@ function Home({ onOpen, onCreateNew, onManageTalams }) {
               Manage Talams
             </button>
             <button
+              onClick={handleImportClick}
+              title={`Import a previously-exported ${NOTATION_FILE_EXTENSION} file`}
+              className="bg-tambura-900 hover:bg-tambura-800 border border-tambura-700 active:scale-95 text-tambura-300 font-semibold text-sm px-4 py-2.5 rounded-md shadow-sm transition-all duration-150"
+            >
+              Import Notation
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept={`${NOTATION_FILE_EXTENSION},application/json`}
+              onChange={handleImportFileChosen}
+              className="hidden"
+            />
+            <button
               onClick={handleCreate}
               className="bg-gold-600 hover:bg-gold-500 active:scale-95 text-white font-semibold text-sm px-5 py-2.5 rounded-md shadow transition-all duration-150"
             >
@@ -75,6 +111,13 @@ function Home({ onOpen, onCreateNew, onManageTalams }) {
             </button>
           </div>
         </div>
+
+        {importError && (
+          <div className="flex items-start justify-between gap-3 mb-6 px-4 py-3 rounded-md border border-rose-800 bg-rose-950/50 text-rose-300 text-sm animate-fade-in-up">
+            <span>{importError}</span>
+            <button onClick={() => setImportError(null)} className="text-rose-400 hover:text-white font-bold shrink-0">×</button>
+          </div>
+        )}
 
         {notations.length === 0 ? (
           <div className="flex flex-col items-center justify-center border-2 border-dashed border-tambura-800 rounded-lg p-16 text-center animate-fade-in">
