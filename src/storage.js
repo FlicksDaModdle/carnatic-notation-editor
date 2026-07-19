@@ -134,6 +134,60 @@ export function deleteCustomTalam(id) {
   writeAllTalams(readAllTalams().filter((t) => t.id !== id));
 }
 
+// --- FILE EXPORT / IMPORT (.kriti) ---
+// A proprietary on-disk format so a notation can be saved out of the
+// browser's localStorage entirely — backed up, emailed, moved to another
+// device/browser — and dragged back in later to keep editing. It's just
+// JSON under the hood, but wrapped in an envelope that identifies and
+// versions itself, so an import can tell a real KritiStudio file apart from
+// a random/corrupted one instead of silently failing or half-loading it.
+export const NOTATION_FILE_FORMAT = 'kritistudio-notation';
+export const NOTATION_FILE_VERSION = 1;
+export const NOTATION_FILE_EXTENSION = '.kriti';
+
+// Wraps a notation snapshot (as built by the editor) in the export envelope.
+// Strips id/createdAt/updatedAt since those are specific to *this* browser's
+// storage — importing always mints a fresh id rather than trying to reuse
+// the original one, so a file can be imported repeatedly (or on a different
+// device that happens to already have an id collision) without clobbering
+// anything already saved.
+export function toNotationFile(notation) {
+  const { id, createdAt, updatedAt, ...portable } = notation;
+  return {
+    kritistudio: true,
+    format: NOTATION_FILE_FORMAT,
+    formatVersion: NOTATION_FILE_VERSION,
+    exportedAt: Date.now(),
+    notation: portable,
+  };
+}
+
+// Parses + validates previously-exported file contents (already read as
+// text) and saves it as a brand-new notation. Throws with a
+// user-presentable message for anything that isn't recognizably one of our
+// files, so the caller can surface it directly.
+export function importNotationFile(rawText) {
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch {
+    throw new Error("That file isn't valid — it doesn't look like a KritiStudio notation file.");
+  }
+  if (!parsed || parsed.format !== NOTATION_FILE_FORMAT || !parsed.notation) {
+    throw new Error("That file isn't a KritiStudio notation file (.kriti).");
+  }
+  if (!Array.isArray(parsed.notation.avartanams)) {
+    throw new Error('That notation file looks corrupted — it\'s missing its score data.');
+  }
+  const now = Date.now();
+  return saveNotation({
+    ...parsed.notation,
+    id: crypto.randomUUID(),
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
 // Blank starter notation shown to a first-time user / on "+ New Notation".
 // Accepts an optional id so a not-yet-saved editor session can be re-created
 // with the same identity it was opened with, and optional overrides for the
