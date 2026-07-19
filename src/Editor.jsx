@@ -1214,9 +1214,18 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
               )}
 
               {/* DISPLAY GRID AREA */}
-              <div className="flex flex-col w-full items-start" style={{ gap: `${rowGap}px` }}>
-                {group.map((aIdx) => {
+              <div className="flex flex-col w-full items-start">
+                {group.map((aIdx, groupPos) => {
                   const avartanam = avartanams[aIdx];
+                  const isLastInGroup = groupPos === group.length - 1;
+                  // Whether this row has any lyric text typed in anywhere
+                  // across its visual lines — used to collapse the lyrics
+                  // strip (and the row-to-row gap after it) when printing,
+                  // since an empty strip of placeholder boxes is only useful
+                  // while editing, not on the printed page.
+                  const rowHasAnyLyrics = avartanam.type === 'notation' || !avartanam.type
+                    ? (avartanam.lyricLines || []).some((arr) => (arr || []).some((w) => (w || '').trim() !== ''))
+                    : true; // subheader/spacer rows don't carry lyrics at all — never collapse their spacing
                   // Subheader/spacer rows are exactly one thing top-to-bottom,
                   // so centering the dock on the whole row centers it on
                   // their content too. Notation rows are taller than what
@@ -1229,7 +1238,17 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
                     ? '50%'
                     : `${NOTE_ROW_PX / 2}px`;
                   return (
-                  <div key={avartanam.id} className="relative w-full group/row flex flex-col items-start animate-fade-in-up">
+                  <div
+                    key={avartanam.id}
+                    className={`relative w-full group/row flex flex-col items-start animate-fade-in-up ${!rowHasAnyLyrics && !isLastInGroup ? 'print-collapse-row-gap' : ''}`}
+                    style={{
+                      marginBottom: isLastInGroup ? 0 : `${rowGap}px`,
+                      // Consumed by the .print-collapse-row-gap rule in
+                      // index.css — only takes effect under print media, and
+                      // only on rows the class above was actually applied to.
+                      '--print-row-gap-collapsed': `${Math.round(rowGap / 2)}px`,
+                    }}
+                  >
                     
                     {/* BUTTON FLOATER DOCK — anchored (via dockTop, see
                         above) to the vertical center of whichever content it
@@ -1327,9 +1346,14 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
                         // row, so on its own it's not unique enough for DOM ids /
                         // getElementById lookups — scope it to this row's UUID.
                         const rowLineId = `${avartanam.id}-${line.lineId}`;
+                        // Whether THIS visual line specifically has any lyric
+                        // text — a multi-line row could have lyrics under one
+                        // line and not another, so this is checked per line
+                        // rather than reusing the whole-row flag above.
+                        const lineHasLyrics = (line.lyricArray || []).some((w) => (w || '').trim() !== '');
 
                         return (
-                          <div key={line.lineId} className="flex flex-col w-full items-stretch pb-2">
+                          <div key={line.lineId} className={`flex flex-col w-full items-stretch ${lineHasLyrics ? 'pb-2' : 'pb-2 print-collapse-pad'}`}>
                             
                             {/* NOTE GRID BLOCK */}
                             <div className="flex items-start justify-between w-full bg-white">
@@ -1386,8 +1410,13 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
                               <div className="flex items-center font-mono font-black text-tambura-900 select-none text-sm self-center" style={{ marginLeft: `${cellGap}px` }}>{line.label}</div>
                             </div>
 
-                            {/* FLEX CONTENT-DRIVEN LYRICS STRIP */}
-                            <div className="flex items-start justify-between w-full mt-2 bg-transparent" onClick={(e) => e.stopPropagation()}>
+                            {/* FLEX CONTENT-DRIVEN LYRICS STRIP — hidden on
+                                print (see .print-collapse-lyrics in
+                                index.css) when this line has no lyric text,
+                                so the empty placeholder boxes and the space
+                                they'd otherwise reserve don't show up on the
+                                printed/exported page. */}
+                            <div className={`flex items-start justify-between w-full mt-2 bg-transparent ${lineHasLyrics ? '' : 'print-collapse-lyrics'}`} onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center font-mono text-transparent opacity-0 select-none text-sm pr-1" style={{ marginRight: `${cellGap}px` }}>||</div>
                               
                               <div className="flex flex-1 items-start justify-between min-w-0">
