@@ -19,9 +19,9 @@ function App() {
 
   const handleRequestNew = () => setShowNewNotationSetup(true);
 
-  const handleConfirmNew = (talam, speed, kalai) => {
+  const handleConfirmNew = (talam, speed, kalai, notationName, ragam, composer, paperSize) => {
     const id = crypto.randomUUID();
-    setDraftNotation(createBlankNotation(id, { selectedTalam: talam, speed, kalai }));
+    setDraftNotation(createBlankNotation(id, { selectedTalam: talam, speed, kalai, title: notationName, ragam, composer, paperSize }));
     setOpenNotationId(id);
     setShowNewNotationSetup(false);
   };
