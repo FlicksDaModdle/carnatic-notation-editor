@@ -1,0 +1,120 @@
+@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Playfair+Display:wght@400;700;900&family=Inter:wght@400;500;600;700&family=Noto+Serif:ital,wght@0,400;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+/* ---------- Carnatic palette ----------
+   "tambura" — warm sandalwood/rosewood neutrals, replacing the default
+   blue-gray (slate) scale, for every background/border/body-text role.
+   "gold" — temple-gold/turmeric accent, replacing the default indigo,
+   for primary actions, links, selection and focus states. */
+@theme {
+  --color-tambura-50: #faf5ef;
+  --color-tambura-100: #f1e6d9;
+  --color-tambura-200: #e2cfb8;
+  --color-tambura-300: #cbb49b;
+  --color-tambura-400: #a88b70;
+  --color-tambura-500: #856a54;
+  --color-tambura-600: #63503f;
+  --color-tambura-700: #493a2e;
+  --color-tambura-800: #33281f;
+  --color-tambura-900: #221a14;
+  --color-tambura-950: #150f0b;
+
+  --color-gold-50: #fbf3dc;
+  --color-gold-100: #f5e4b0;
+  --color-gold-200: #eccf72;
+  --color-gold-300: #e2b94a;
+  --color-gold-400: #d9a62e;
+  --color-gold-500: #c08f1e;
+  --color-gold-600: #a97615;
+  --color-gold-700: #855c11;
+  --color-gold-800: #603e0e;
+  --color-gold-900: #3d2708;
+  --color-gold-950: #2b1c06;
+}
+
+/* ---------- Animations ---------- */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out both;
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up {
+  animation: fade-in-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-menu-in {
+  animation: menu-in 0.12s cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: top left;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.85); }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 1.1s ease-in-out infinite;
+}
+
+@keyframes pop-in {
+  0% { opacity: 0; transform: scale(0.85); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.animate-pop-in {
+  animation: pop-in 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Smooth, springy feel across interactive controls */
+button, input, select, textarea {
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Clean PDF Print Handshake */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  
+  /* Hide the inputs outline structure during print */
+  input {
+    border-color: transparent !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
+  }
+
+  /* Force system components to ignore background color specs on print */
+  .border {
+    border-color: transparent !important;
+  }
+
+  /* Placeholder hints ("Enter Title", "...") are editing affordances, not
+     part of the notation — never let them show up in exported output. */
+  ::placeholder {
+    color: transparent !important;
+    opacity: 0 !important;
+  }
+
+  /* Belt-and-suspenders: even if something still has focus when the print
+     dialog opens, its focus ring/outline should never appear on paper. */
+  *:focus {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+}
