@@ -65,6 +65,13 @@ const PAGE_HEIGHT_PX = {
   Letter: 11 * 96,
 };
 
+// Companion widths, same 96 CSS px/in basis — used to compute "Fit Width"
+// and "Fit Page" zoom levels against the actual on-screen canvas size.
+const PAGE_WIDTH_PX = {
+  A4: (210 / 25.4) * 96,
+  Letter: 8.5 * 96,
+};
+
 // Must stay in sync with the `html { font-size: ... }` rule in index.css.
 // Every Tailwind rem-based utility on the page (p-12, pb-2, mt-2, ...)
 // resolves against this, so pagination math needs the same number to turn
@@ -229,6 +236,58 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
       headerObserverRef.current = ro;
     }
   }, []);
+
+  // --- ZOOM ---
+  // 'percent' uses zoomPercent directly; 'fit-width'/'fit-page' are
+  // recomputed from the live canvas size below, the one other place (besides
+  // the header) where a live DOM measurement is unavoidable — the visible
+  // canvas area depends on window size and sidebar state, neither of which
+  // can be predicted from fixed CSS math the way page/row geometry can.
+  const [zoomMode, setZoomMode] = useState('percent'); // 'percent' | 'fit-width' | 'fit-page'
+  const [zoomPercent, setZoomPercent] = useState(100);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+
+  const canvasObserverRef = useRef(null);
+  const setCanvasRef = useCallback((node) => {
+    if (canvasObserverRef.current) {
+      canvasObserverRef.current.disconnect();
+      canvasObserverRef.current = null;
+    }
+    if (node) {
+      const measure = () => setCanvasSize({ width: node.clientWidth, height: node.clientHeight });
+      measure();
+      const ro = new ResizeObserver(measure);
+      ro.observe(node);
+      canvasObserverRef.current = ro;
+    }
+  }, []);
+
+  const CANVAS_PADDING_PX = 32; // main canvas has p-8 (2rem) on all sides
+
+  const effectiveZoom = useMemo(() => {
+    const pageWidthPx = PAGE_WIDTH_PX[paperSize] || PAGE_WIDTH_PX.A4;
+    const pageHeightPx = PAGE_HEIGHT_PX[paperSize] || PAGE_HEIGHT_PX.A4;
+    const availWidth = Math.max(50, canvasSize.width - CANVAS_PADDING_PX * 2);
+    const availHeight = Math.max(50, canvasSize.height - CANVAS_PADDING_PX * 2);
+
+    let z;
+    if (zoomMode === 'fit-width') z = availWidth / pageWidthPx;
+    else if (zoomMode === 'fit-page') z = Math.min(availWidth / pageWidthPx, availHeight / pageHeightPx);
+    else z = zoomPercent / 100;
+
+    return Math.min(3, Math.max(0.25, z || 1));
+  }, [zoomMode, zoomPercent, canvasSize, paperSize]);
+
+  // +/- steppers and the numeric dropdown all work in 'percent' mode — they
+  // snap off of whatever the current effective zoom is (even mid Fit Width/
+  // Fit Page), so nudging always feels continuous.
+  const nudgeZoom = (deltaPercent) => {
+    setZoomMode('percent');
+    setZoomPercent((prev) => {
+      const base = zoomMode === 'percent' ? prev : Math.round(effectiveZoom * 100);
+      return Math.min(300, Math.max(25, Math.round((base + deltaPercent) / 5) * 5));
+    });
+  };
 
   // Groups of absolute avartanam indices, one group per visible page. Page 1
   // has less room (the ragam/title/composer header eats into it), every
@@ -667,6 +726,28 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
     return () => window.removeEventListener('keydown', handleSaveKey);
   }, [handleManualSave]);
 
+  // Zoom shortcuts (⌘/Ctrl +/-/0), matching the View menu entries above.
+  useEffect(() => {
+    const handleZoomKey = (e) => {
+      const isModifier = e.metaKey || e.ctrlKey;
+      if (!isModifier) return;
+      if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        nudgeZoom(10);
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault();
+        nudgeZoom(-10);
+      } else if (e.key === '0') {
+        e.preventDefault();
+        setZoomMode('percent');
+        setZoomPercent(100);
+      }
+    };
+    window.addEventListener('keydown', handleZoomKey);
+    return () => window.removeEventListener('keydown', handleZoomKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoomMode, effectiveZoom]);
+
   // Printing/exporting should show the notation sheet only — never the
   // editor's current selection highlight or a focused field's outline.
   // 'beforeprint' fires for every trigger (toolbar button, menu item, or the
@@ -941,6 +1022,12 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
       label: 'View',
       items: [
         { label: 'Show Sidebar', checked: sidebarOpen, onClick: () => setSidebarOpen((v) => !v) },
+        { divider: true },
+        { label: 'Zoom In', onClick: () => nudgeZoom(10), shortcut: '⌘+' },
+        { label: 'Zoom Out', onClick: () => nudgeZoom(-10), shortcut: '⌘−' },
+        { label: 'Zoom to 100%', onClick: () => { setZoomMode('percent'); setZoomPercent(100); }, shortcut: '⌘0' },
+        { label: 'Fit Width', onClick: () => setZoomMode('fit-width') },
+        { label: 'Fit Page', onClick: () => setZoomMode('fit-page') },
       ],
     },
   ];
@@ -1014,6 +1101,59 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
             <ToolbarButton onClick={handleExportFile} label={`Export Notation File (${NOTATION_FILE_EXTENSION})`}>
               <DownloadIcon className="w-4 h-4" />
             </ToolbarButton>
+
+            <div className="w-px h-4 bg-tambura-800 mx-1.5" />
+
+            {/* ZOOM CONTROLS — percent steppers plus a dropdown covering
+                common presets and the two "fit" modes. The dropdown always
+                reflects the live effective zoom (even while a fit mode is
+                active) so it never looks stale. */}
+            <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => nudgeZoom(-10)}
+                title="Zoom out"
+                aria-label="Zoom out"
+                className="w-7 h-7 flex items-center justify-center rounded text-tambura-300 hover:bg-tambura-800 hover:text-gold-300 active:scale-90 transition-all duration-150 text-sm font-bold"
+              >
+                −
+              </button>
+              <select
+                value={zoomMode === 'percent' ? String(Math.round(effectiveZoom * 100)) : zoomMode}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === 'fit-width' || val === 'fit-page') {
+                    setZoomMode(val);
+                  } else {
+                    setZoomMode('percent');
+                    setZoomPercent(Number(val));
+                  }
+                }}
+                title="Zoom level"
+                aria-label="Zoom level"
+                className="bg-tambura-900 hover:bg-tambura-800 border border-tambura-700 text-tambura-200 text-xs font-semibold rounded-md py-1 pl-2 pr-1 focus:outline-none focus:border-gold-500 cursor-pointer"
+              >
+                {zoomMode !== 'percent' && (
+                  <option value={zoomMode}>{Math.round(effectiveZoom * 100)}%</option>
+                )}
+                <option value="50">50%</option>
+                <option value="75">75%</option>
+                <option value="90">90%</option>
+                <option value="100">100%</option>
+                <option value="125">125%</option>
+                <option value="150">150%</option>
+                <option value="200">200%</option>
+                <option value="fit-width">Fit Width</option>
+                <option value="fit-page">Fit Page</option>
+              </select>
+              <button
+                onClick={() => nudgeZoom(10)}
+                title="Zoom in"
+                aria-label="Zoom in"
+                className="w-7 h-7 flex items-center justify-center rounded text-tambura-300 hover:bg-tambura-800 hover:text-gold-300 active:scale-90 transition-all duration-150 text-sm font-bold"
+              >
+                +
+              </button>
+            </div>
 
             <div className="w-px h-4 bg-tambura-800 mx-1.5" />
 
@@ -1161,9 +1301,12 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
         )}
 
         {/* WORKSPACE PAPER CANVAS */}
-        <main className="flex-1 bg-tambura-800 p-8 overflow-auto print:bg-white print:p-0 print:overflow-visible">
+        <main ref={setCanvasRef} className="flex-1 bg-tambura-800 p-8 overflow-auto print:bg-white print:p-0 print:overflow-visible">
           
-          <div className="relative flex flex-col items-center gap-8 mx-auto w-fit print:w-full print:mx-0 print:gap-0">
+          <div
+            className="zoom-wrapper relative flex flex-col items-center gap-8 mx-auto w-fit print:w-full print:mx-0 print:gap-0"
+            style={{ transform: `scale(${effectiveZoom})`, transformOrigin: 'top center' }}
+          >
             {pageGroups.map((group, pageIdx) => {
             const isLastPage = pageIdx === pageGroups.length - 1;
             return (

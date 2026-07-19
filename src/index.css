@@ -104,6 +104,13 @@ html {
     background: white !important;
     color: black !important;
   }
+
+  /* On-screen zoom (see the Zoom controls in the toolbar) is a viewing
+     convenience only — printed/exported output must always come out at
+     true 100% size, no matter what zoom level was showing on screen. */
+  .zoom-wrapper {
+    transform: none !important;
+  }
   
   /* Hide the inputs outline structure during print */
   input {
