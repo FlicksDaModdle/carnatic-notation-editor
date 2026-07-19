@@ -177,6 +177,9 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
   // Which row's "insert subheader/spacer" palette popover is currently open
   // (an avartanam index), or null if none is.
   const [rowPaletteFor, setRowPaletteFor] = useState(null);
+  // Which row's marker (numbered/bulleted left-margin label) popover is
+  // currently open, or null if none is.
+  const [markerPaletteFor, setMarkerPaletteFor] = useState(null);
   const fontFamily = FONT_OPTIONS[docFont]?.family || FONT_OPTIONS.serif.family;
 
   // --- MULTI-PAGE PAGINATION (Google-Docs-style) ---
@@ -762,6 +765,12 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
 
   const clampSpacerHeight = (n) => Math.min(SPACER_MAX_PX, Math.max(SPACER_MIN_PX, n));
 
+  // Sets/clears a row's left-margin marker. `type` is 'number' or 'bullet';
+  // `text` is only meaningful for 'number' (freely typed — the user picks
+  // whatever label they want, not necessarily a literal sequential number).
+  // Passing null for marker removes it.
+  const setRowMarker = (index, marker) => updateSpecialRow(index, { marker });
+
   const clearAllNotes = () => {
     if (avartanams.length === 0) return;
     if (!window.confirm('Clear all rows from this notation? This cannot be undone once you leave the editor.')) return;
@@ -1174,7 +1183,7 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
                   ? (paperSize === 'Letter' ? 'min-h-[11in]' : 'min-h-[297mm]')
                   : (paperSize === 'Letter' ? 'h-[11in] overflow-hidden' : 'h-[297mm] overflow-hidden')
               } ${pageIdx > 0 ? 'print:break-before-page' : ''}`}
-              onClick={() => { setSelectedCell(null); setLastTypedCell(null); setRowPaletteFor(null); }}
+              onClick={() => { setSelectedCell(null); setLastTypedCell(null); setRowPaletteFor(null); setMarkerPaletteFor(null); }}
             >
               {/* DOCUMENT AUTO-ADAPTING HEADER — only on the first page, like a
                   real score sheet's title block; later pages are pure content. */}
@@ -1266,10 +1275,19 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
                         <button
                           title="Insert subheader or spacer…"
                           aria-label="Insert subheader or spacer"
-                          onClick={(e) => { e.stopPropagation(); setRowPaletteFor(rowPaletteFor === aIdx ? null : aIdx); }}
+                          onClick={(e) => { e.stopPropagation(); setMarkerPaletteFor(null); setRowPaletteFor(rowPaletteFor === aIdx ? null : aIdx); }}
                           className={`text-xs font-bold w-7 h-7 rounded-md flex items-center justify-center ${rowPaletteFor === aIdx ? 'bg-gold-600 text-white' : 'text-tambura-300 hover:bg-gold-600 hover:text-white'}`}
                         >
                           ▾
+                        </button>
+                        <div className="w-[1px] h-4 bg-tambura-700 mx-0.5" />
+                        <button
+                          title="Add or edit row marker (number/bullet)…"
+                          aria-label="Add or edit row marker"
+                          onClick={(e) => { e.stopPropagation(); setRowPaletteFor(null); setMarkerPaletteFor(markerPaletteFor === aIdx ? null : aIdx); }}
+                          className={`text-xs font-bold w-7 h-7 rounded-md flex items-center justify-center ${markerPaletteFor === aIdx || avartanam.marker ? 'bg-gold-600 text-white' : 'text-tambura-300 hover:bg-gold-600 hover:text-white'}`}
+                        >
+                          #
                         </button>
                         <div className="w-[1px] h-4 bg-tambura-700 mx-0.5" />
                         <button title="Delete row" aria-label="Delete row" onClick={(e) => { e.stopPropagation(); deleteRowAt(aIdx); }} className="text-sm font-bold w-7 h-7 text-rose-400 hover:bg-rose-600 hover:text-white rounded-md flex items-center justify-center">×</button>
@@ -1292,7 +1310,71 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
                           <button onClick={() => { insertRowAt(aIdx, 'below', 'spacer'); setRowPaletteFor(null); }} className="text-left text-xs font-semibold px-2 py-1.5 rounded text-tambura-200 hover:bg-gold-600 hover:text-white">Spacer</button>
                         </div>
                       )}
+
+                      {/* ROW MARKER PALETTE — lets the user attach a
+                          free-typed number/label or a plain bullet to the
+                          left margin of this specific row. Unlike subheaders
+                          (a full row of their own), a marker sits beside an
+                          existing row without taking up a line. */}
+                      {markerPaletteFor === aIdx && (
+                        <div
+                          className="bg-tambura-950 border border-tambura-700 rounded-lg shadow-md flex flex-col p-2 w-44 gap-1.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <span className="text-[9px] font-mono uppercase tracking-wider text-tambura-500 px-0.5">Row marker</span>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => setRowMarker(aIdx, { type: 'number', text: avartanam.marker?.type === 'number' ? (avartanam.marker.text || '') : '' })}
+                              className={`flex-1 text-xs font-semibold px-2 py-1 rounded ${avartanam.marker?.type === 'number' ? 'bg-gold-600 text-white' : 'text-tambura-200 bg-tambura-900 hover:bg-gold-600 hover:text-white'}`}
+                            >
+                              Number
+                            </button>
+                            <button
+                              onClick={() => setRowMarker(aIdx, { type: 'bullet' })}
+                              className={`flex-1 text-xs font-semibold px-2 py-1 rounded ${avartanam.marker?.type === 'bullet' ? 'bg-gold-600 text-white' : 'text-tambura-200 bg-tambura-900 hover:bg-gold-600 hover:text-white'}`}
+                            >
+                              Bullet
+                            </button>
+                          </div>
+                          {avartanam.marker?.type === 'number' && (
+                            <input
+                              type="text"
+                              autoFocus
+                              value={avartanam.marker.text || ''}
+                              onChange={(e) => setRowMarker(aIdx, { type: 'number', text: e.target.value })}
+                              placeholder="e.g. 1, 2a, iv…"
+                              className="w-full text-xs font-mono px-2 py-1 rounded bg-tambura-900 text-tambura-100 placeholder-tambura-500 border border-tambura-700 focus:outline-none focus:border-gold-500"
+                            />
+                          )}
+                          {avartanam.marker && (
+                            <button
+                              onClick={() => { setRowMarker(aIdx, null); setMarkerPaletteFor(null); }}
+                              className="text-left text-xs font-semibold px-2 py-1 rounded text-rose-400 hover:bg-rose-600 hover:text-white"
+                            >
+                              Remove marker
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
+
+                    {/* ROW MARKER — the number/bullet label itself, always
+                        visible (including print) in the left margin of the
+                        row it's attached to, vertically aligned with the
+                        same anchor point the button dock above uses. */}
+                    {avartanam.marker && (
+                      <div
+                        className="absolute right-full mr-2 -translate-y-1/2 z-10 flex items-center justify-end min-w-[16px]"
+                        style={{ top: dockTop }}
+                      >
+                        <span
+                          className="text-tambura-700 font-bold leading-none whitespace-nowrap"
+                          style={{ fontFamily, fontSize: avartanam.marker.type === 'bullet' ? '18px' : '20px' }}
+                        >
+                          {avartanam.marker.type === 'bullet' ? '•' : (avartanam.marker.text || '')}
+                        </span>
+                      </div>
+                    )}
 
                     {avartanam.type === 'subheader' ? (
                       /* SUBHEADER ROW — a plain, customizable, left-aligned
