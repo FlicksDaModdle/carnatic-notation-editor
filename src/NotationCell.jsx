@@ -46,7 +46,7 @@ function NotationCell({ cell, isSelected, onFocus, size, aIdx, bIdx, cIdx }) {
         ) : null}
       </div>
 
-      <div className="h-1.5 min-h-0 overflow-hidden flex items-center justify-center text-[5px] text-tambura-900 font-bold leading-none">
+      <div className="h-2 min-h-0 overflow-hidden flex items-center justify-center text-[8px] text-tambura-900 font-bold leading-none">
         {cell.octave === 'higher' ? '●' : ''}
       </div>
 
@@ -60,7 +60,7 @@ function NotationCell({ cell, isSelected, onFocus, size, aIdx, bIdx, cIdx }) {
         {cell.swaram || <span className="print:hidden">-</span>}
       </div>
 
-      <div className="h-1.5 min-h-0 overflow-hidden flex items-center justify-center text-[5px] text-tambura-900 font-bold leading-none">
+      <div className="h-2 min-h-0 overflow-hidden flex items-center justify-center text-[8px] text-tambura-900 font-bold leading-none">
         {cell.octave === 'lower' ? '●' : ''}
       </div>
     </div>
