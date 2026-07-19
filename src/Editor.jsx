@@ -1179,10 +1179,21 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
                 // matter what. The last page keeps a *min*-height instead
                 // so the "append row" affordance below the content still
                 // has room to sit under a short final page.
+                //
+                // The vertical clip is done with clip-path rather than
+                // `overflow-hidden`: overflow-hidden clips BOTH axes, and
+                // per spec, setting overflow-x/overflow-y to different
+                // values when one is `visible` silently converts the
+                // `visible` one to `auto` — which still clips, just via an
+                // invisible scroll boundary. That was cutting off the
+                // floating row dock, which intentionally hangs off the
+                // page's left edge. clip-path lets us bound the top/bottom
+                // only and leave left/right open indefinitely.
                 isLastPage
                   ? (paperSize === 'Letter' ? 'min-h-[11in]' : 'min-h-[297mm]')
-                  : (paperSize === 'Letter' ? 'h-[11in] overflow-hidden' : 'h-[297mm] overflow-hidden')
+                  : (paperSize === 'Letter' ? 'h-[11in]' : 'h-[297mm]')
               } ${pageIdx > 0 ? 'print:break-before-page' : ''}`}
+              style={!isLastPage ? { clipPath: 'inset(0 -9999px 0 -9999px)' } : undefined}
               onClick={() => { setSelectedCell(null); setLastTypedCell(null); setRowPaletteFor(null); setMarkerPaletteFor(null); }}
             >
               {/* DOCUMENT AUTO-ADAPTING HEADER — only on the first page, like a
