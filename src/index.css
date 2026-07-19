@@ -130,4 +130,29 @@ html {
     outline: none !important;
     box-shadow: none !important;
   }
+
+  /* A visual line with no lyrics typed in still shows its strip of empty
+     placeholder boxes while editing (so it's obvious where lyrics *could*
+     go), but on the printed/exported page that's just dead space — hide it
+     entirely, including the margin that was reserving room for it. */
+  .print-collapse-lyrics {
+    display: none !important;
+  }
+
+  /* Companion to .print-collapse-lyrics: removes the trailing padding a
+     line normally keeps under its lyrics strip, so nothing is left behind
+     once the strip itself is gone. */
+  .print-collapse-pad {
+    padding-bottom: 0 !important;
+  }
+
+  /* Applied to a whole notation row when none of its lines have any
+     lyrics anywhere — pulls the next row up closer instead of leaving the
+     row's full normal gap (sized for a lyrics strip that isn't there).
+     The actual value comes from the row's own --print-row-gap-collapsed
+     custom property (set inline, proportional to the user's row-spacing
+     setting) rather than a fixed number here. */
+  .print-collapse-row-gap {
+    margin-bottom: var(--print-row-gap-collapsed, 0px) !important;
+  }
 }
