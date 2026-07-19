@@ -1,5 +1,5 @@
 // src/Editor.jsx
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { getTalamConfig, createBlankBeat, computeLineGroups, migrateRowLyrics } from './talamTemplates';
 import NotationCell from './NotationCell';
 import MenuBar from './MenuBar';
@@ -56,6 +56,14 @@ function ToolbarButton({ onClick, disabled, active, label, shortcut, children })
     </button>
   );
 }
+
+// Real on-screen pixel height of one printed page at 96 CSS px/in — used to
+// figure out how many rows fit on a page before a fresh one is needed, the
+// same way a word processor paginates as you type.
+const PAGE_HEIGHT_PX = {
+  A4: (297 / 25.4) * 96,
+  Letter: 11 * 96,
+};
 
 const FONT_OPTIONS = {
   serif: { label: 'Classic Serif', family: 'Georgia, "Noto Serif", serif' },
@@ -122,6 +130,78 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
   const fontFamily = FONT_OPTIONS[docFont]?.family || FONT_OPTIONS.serif.family;
+
+  // --- MULTI-PAGE PAGINATION (Google-Docs-style) ---
+  // Every avartanam row renders with the same number of visual lines and the
+  // same note/lyric cell sizing, so all rows come out the same height — that
+  // means one measured sample row (plus one measured header) is enough to
+  // know how many rows fit on a page, without re-measuring every row on
+  // every keystroke. Re-measured only when something that could change that
+  // row height actually changes (font, spacing, paper size).
+  const pageRef = useRef(null);
+  const headerRef = useRef(null);
+  const rowRef = useRef(null);
+  const [measuredRowHeight, setMeasuredRowHeight] = useState(0);
+  const [measuredHeaderHeight, setMeasuredHeaderHeight] = useState(0);
+  const [measuredPagePadding, setMeasuredPagePadding] = useState(96);
+
+  useLayoutEffect(() => {
+    if (avartanams.length === 0) return;
+    const rowEl = rowRef.current;
+    if (!rowEl) return;
+
+    setMeasuredRowHeight(rowEl.getBoundingClientRect().height);
+
+    const headerEl = headerRef.current;
+    if (headerEl) {
+      const headerRect = headerEl.getBoundingClientRect();
+      const headerMarginBottom = parseFloat(getComputedStyle(headerEl).marginBottom) || 0;
+      setMeasuredHeaderHeight(headerRect.height + headerMarginBottom);
+    }
+
+    const pageEl = pageRef.current;
+    if (pageEl) {
+      const pageStyle = getComputedStyle(pageEl);
+      const padding = (parseFloat(pageStyle.paddingTop) || 0) + (parseFloat(pageStyle.paddingBottom) || 0);
+      setMeasuredPagePadding(padding);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontSize, cellGap, rowGap, docFont, paperSize, avartanams.length > 0]);
+
+  // Groups of absolute avartanam indices, one group per visible page. Page 1
+  // has less room (the ragam/title/composer header eats into it), every
+  // page after that gets the full page height.
+  const pageGroups = useMemo(() => {
+    const total = avartanams.length;
+    if (total === 0) return [[]];
+
+    const pageHeightPx = PAGE_HEIGHT_PX[paperSize] || PAGE_HEIGHT_PX.A4;
+    const rowH = measuredRowHeight || 90;
+    const headerH = measuredHeaderHeight || 90;
+    const padding = measuredPagePadding || 96;
+    const footerReserve = 8;
+
+    const firstPageAvail = pageHeightPx - padding - headerH - footerReserve;
+    const otherPageAvail = pageHeightPx - padding - footerReserve;
+
+    const capacityFor = (available) => {
+      if (rowH <= 0) return total;
+      // n rows need n*rowH + (n-1)*rowGap of space.
+      return Math.max(1, Math.floor((available + rowGap) / (rowH + rowGap)));
+    };
+
+    const groups = [];
+    let idx = 0;
+    let isFirstPage = true;
+    while (idx < total) {
+      const capacity = capacityFor(isFirstPage ? firstPageAvail : otherPageAvail);
+      const end = Math.min(total, idx + capacity);
+      groups.push(Array.from({ length: end - idx }, (_, k) => idx + k));
+      idx = end;
+      isFirstPage = false;
+    }
+    return groups.length ? groups : [[]];
+  }, [avartanams.length, measuredRowHeight, measuredHeaderHeight, measuredPagePadding, paperSize, rowGap]);
 
   // --- UNDO / REDO HISTORY (covers notes + lyrics, since both live on avartanams) ---
   const [history, setHistory] = useState(() => [JSON.parse(JSON.stringify(initialNotation.avartanams || []))]);
@@ -939,17 +1019,21 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
         {/* WORKSPACE PAPER CANVAS */}
         <main className="flex-1 bg-tambura-800 p-8 overflow-auto print:bg-white print:p-0 print:overflow-visible">
           
-          <div className="relative flex flex-col items-stretch mx-auto w-fit print:w-full print:mx-0">
-            
+          <div className="relative flex flex-col items-center gap-8 mx-auto w-fit print:w-full print:mx-0 print:gap-0">
+            {pageGroups.map((group, pageIdx) => (
+            <React.Fragment key={pageIdx}>
             <div 
-              id="notation-paper" 
+              id={pageIdx === 0 ? 'notation-paper' : undefined}
+              ref={pageIdx === 0 ? pageRef : undefined}
               className={`bg-white text-tambura-900 p-12 shadow-2xl rounded-sm flex flex-col items-stretch relative print:shadow-none print:p-0 print:w-full ${
                 paperSize === 'Letter' ? 'w-[8.5in] min-h-[11in]' : 'w-[210mm] min-h-[297mm]'
-              }`}
+              } ${pageIdx > 0 ? 'print:break-before-page' : ''}`}
               onClick={() => { setSelectedCell(null); setLastTypedCell(null); }}
             >
-              {/* DOCUMENT AUTO-ADAPTING HEADER */}
-              <div className="w-full flex justify-between items-start mb-8 border-b border-tambura-400 pb-4 gap-4 text-xs h-auto shrink-0" onClick={(e) => e.stopPropagation()}>
+              {/* DOCUMENT AUTO-ADAPTING HEADER — only on the first page, like a
+                  real score sheet's title block; later pages are pure content. */}
+              {pageIdx === 0 && (
+              <div ref={headerRef} className="w-full flex justify-between items-start mb-8 border-b border-tambura-400 pb-4 gap-4 text-xs h-auto shrink-0" onClick={(e) => e.stopPropagation()}>
                 <div className="w-1/3 flex flex-col items-start">
                   <span className="text-[9px] font-mono text-tambura-400 uppercase tracking-wider block mb-1">Ragam</span>
                   <AutoResizeTextarea 
@@ -981,10 +1065,10 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
                   />
                 </div>
               </div>
-
+              )}
 
               {/* EMPTY STATE */}
-              {avartanams.length === 0 && (
+              {pageIdx === 0 && avartanams.length === 0 && (
                 <div className="flex flex-col items-center justify-center my-auto border-2 border-dashed border-tambura-200 p-12 rounded-lg text-center print:hidden">
                   <p className="text-tambura-400 italic text-sm mb-4">Your score sheet is empty.</p>
                   <button onClick={appendNewRow} className="bg-gold-600 hover:bg-gold-700 text-white font-semibold text-xs py-2 px-5 rounded-md shadow active:scale-95 transition-all duration-150">
@@ -995,8 +1079,10 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
 
               {/* DISPLAY GRID AREA */}
               <div className="flex flex-col w-full items-start" style={{ gap: `${rowGap}px` }}>
-                {avartanams.map((avartanam, aIdx) => (
-                  <div key={avartanam.id} className="relative w-full group/row flex flex-col items-start animate-fade-in-up">
+                {group.map((aIdx) => {
+                  const avartanam = avartanams[aIdx];
+                  return (
+                  <div key={avartanam.id} ref={aIdx === 0 ? rowRef : undefined} className="relative w-full group/row flex flex-col items-start animate-fade-in-up">
                     
                     {/* BUTTON FLOATER DOCK */}
                     <div className="absolute right-[102%] top-2 bg-tambura-950 border border-tambura-700 rounded shadow-md opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 print:hidden p-0.5 gap-0.5 z-20 flex items-center" onClick={(e) => e.stopPropagation()}>
@@ -1142,11 +1228,13 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
                     </div>
 
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
-              {/* BOTTOM APPEND BAR */}
-              {avartanams.length > 0 && (
+              {/* BOTTOM APPEND BAR — only after the very last row on the very
+                  last page, so it never shows up mid-document. */}
+              {pageIdx === pageGroups.length - 1 && avartanams.length > 0 && (
                 <div className="mt-12 flex justify-center print:hidden border-t border-dashed border-tambura-200 pt-6">
                   <button onClick={appendNewRow} className="bg-tambura-100 hover:bg-gold-50 border border-tambura-300 hover:border-gold-300 text-tambura-700 hover:text-gold-600 font-bold text-xs py-2 px-8 rounded-md shadow-sm active:scale-95 transition-all duration-150">
                     + Append Row to Bottom
@@ -1155,6 +1243,17 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
               )}
 
             </div>
+
+            {/* Page number, sitting on the gray canvas below the sheet itself
+                — like the page separator strip in Google Docs — so it never
+                eats into the printable page's own content area. */}
+            {pageGroups.length > 1 && (
+              <div className="text-[11px] font-mono text-tambura-400 select-none print:hidden -mt-4">
+                Page {pageIdx + 1} of {pageGroups.length}
+              </div>
+            )}
+            </React.Fragment>
+            ))}
           </div>
         </main>
       </div>

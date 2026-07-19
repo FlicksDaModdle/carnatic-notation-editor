@@ -80,9 +80,10 @@ button, input, select, textarea {
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Make the entire UI a bit bigger by scaling up base font sizes */
+/* Make the entire UI a bit bigger by scaling up base font sizes — every
+   Tailwind rem-based size (text, padding, gaps, icons) scales up with it. */
 html {
-  font-size: 18px;
+  font-size: 20px;
 }
 
 /* Clean PDF Print Handshake */
