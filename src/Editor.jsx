@@ -1523,7 +1523,7 @@ function Editor({ notationId, draftNotation, onExit, onNew, onDuplicate, onDelet
                       >
                         <span
                           className="text-tambura-700 font-bold leading-none whitespace-nowrap"
-                          style={{ fontFamily, fontSize: avartanam.marker.type === 'bullet' ? '18px' : '20px' }}
+                          style={{ fontFamily, fontSize: `${fontSize + (avartanam.marker.type === 'bullet' ? -3 : 0)}px` }}
                         >
                           {avartanam.marker.type === 'bullet' ? '•' : (avartanam.marker.text || '')}
                         </span>
